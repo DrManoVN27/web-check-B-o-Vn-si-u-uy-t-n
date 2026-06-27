@@ -103,3 +103,4 @@ database `tech_news_db` → bảng `articles` → chuột phải →
   **không cần sửa code app.py / main.py**.
 - Nếu một bước nào đó (hoặc MySQL) chưa sẵn sàng, app vẫn chạy được
   nhờ cơ chế xử lý lỗi có sẵn trong `main.py` / `app.py`.
+"# web-check-B-o-Vn-si-u-uy-t-n" 
