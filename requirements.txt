@@ -1,0 +1,8 @@
+pandas
+streamlit
+matplotlib
+mysql-connector-python
+requests
+beautifulsoup4
+underthesea
+wordcloud
