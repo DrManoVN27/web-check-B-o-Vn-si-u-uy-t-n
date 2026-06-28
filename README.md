@@ -63,14 +63,15 @@ Trong Web App có nút **"Kiểm tra kết nối MySQL"** ở menu bên trái.
 
 | Ai | File | Trạng thái |
 |---|---|---|
-| TV1 | `modules/tv1_crawler.py` | ✅ Đã gán code thật (crawl Tuổi Trẻ) |
+| TV1 | `modules/tv1_crawler.py` | ✅ Đã gán code thật — cào **VnExpress** (requests, chạy mọi nơi) + **Tuổi Trẻ** (Selenium, cần Chrome) |
 | TV2 | `modules/tv2_database.py` | ✅ Đã gán code thật (tạo bảng MySQL) |
 | TV3 | `modules/tv3_cleaning.py` | ✅ Đã gán code thật (12 bước clean + import MySQL) |
 | TV4 | `modules/tv4_charts.py` | ⏳ Đang chờ — gửi code khi xong, hàm cần tên `draw_charts(df)` |
-| **TV5** | `app.py`, `main.py`, `requirements.txt`, `README.md` | ✅ Trưởng nhóm — Tích hợp hệ thống & Quản lý chất lượng |
+| **TV5** | `app.py`, `main.py`, `requirements.txt`, `README.md` | ✅ Trưởng nhóm — Xây dựng hệ thống Web/Giao diện & Quản lý chất lượng code |
 
 **Việc cụ thể của TV5 (System Integrator & Editor):**
-- Thiết kế và code **`app.py`** — Web App (Streamlit):
+- **Xây dựng hệ thống Web/Giao diện**: thiết kế và code toàn bộ
+  **`app.py`** — Web App (Streamlit):
   - **Menu điều khiển (sidebar)**: nút kiểm tra kết nối MySQL, 4 nút
     chạy từng bước pipeline riêng lẻ (TV1→TV4), 1 nút chạy toàn bộ
     pipeline, nút tải lại dữ liệu mẫu/có sẵn, khung nhật ký chạy.
@@ -81,12 +82,19 @@ Trong Web App có nút **"Kiểm tra kết nối MySQL"** ở menu bên trái.
   - Bố cục `layout="wide"`, tiêu đề, icon, caption mô tả từng phần.
 - Code **`main.py`** — chạy pipeline liên hoàn bằng terminal (không cần
   mở web): TV1 → TV2 → TV3 → TV4.
-- Bọc code thật của TV1/TV2/TV3 thành các hàm chuẩn (`crawl_news()`,
-  `push_to_db()`, `clean_data()`) để web app gọi được qua nút bấm, giữ
-  nguyên 100% logic xử lý của từng người.
+- **Quản lý code từng thành viên**: nhận code thật của TV1/TV2/TV3,
+  bọc thành các hàm chuẩn (`crawl_news()`, `push_to_db()`, `clean_data()`)
+  để web app gọi được qua nút bấm, giữ nguyên 100% logic xử lý của
+  từng người — không sửa cách họ viết, chỉ thêm lớp "vỏ" gọi hàm.
+  Khi TV1 gửi thêm crawler VnExpress (ngoài Tuổi Trẻ ban đầu), TV5
+  gộp 2 nguồn vào cùng 1 file `tv1_crawler.py`, đổi tên các hàm
+  trùng nhau (`get_soup`, `parse_article`...) để không đè lẫn logic.
 - Xử lý lệch cấu trúc dữ liệu giữa các module (tên cột tiếng Việt/tiếng
   Anh khác nhau, tên file CSV khác nhau) bằng lớp chuẩn hóa trong `app.py`,
   để không bắt từng người phải sửa code theo nhau.
+- Đảm bảo app **không bị sập** khi thiếu thư viện/môi trường (ví dụ
+  server cloud không có Chrome cho Selenium) bằng try/except rõ ràng,
+  để các phần không liên quan vẫn hoạt động bình thường.
 - Deploy app lên Streamlit Community Cloud (qua GitHub) để có link
   public, ai cũng xem được không cần cài đặt gì.
 - Viết tài liệu hướng dẫn (`README.md`), quản lý cấu trúc thư mục project.

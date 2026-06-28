@@ -1,32 +1,36 @@
 """
 ============================================================
-THÀNH VIÊN 1 - CRAWLER (Tuổi Trẻ bằng Selenium)
+THÀNH VIÊN 1 - CRAWLER (VnExpress bằng requests + Tuổi Trẻ bằng Selenium)
 ============================================================
-Đây là code GỐC của TV1 (file crawler_fixed.py), được giữ
-NGUYÊN VẸN 100% logic xử lý — chỉ bọc thêm hàm crawl_news()
-ở cuối để Web App (app.py) có thể gọi qua nút bấm.
+File này gộp 2 crawler GỐC của TV1:
+  - crawler_vnexpress.py  (requests + BeautifulSoup, KHÔNG cần Chrome)
+  - crawler_fixed.py      (Selenium, CẦN Google Chrome)
 
-Toàn bộ code phía trên hàm crawl_news() là code TV1 viết,
-KHÔNG bị sửa đổi.
+Toàn bộ logic xử lý của TV1 được giữ NGUYÊN VẸN — chỉ đổi tên vài
+hàm trùng nhau giữa 2 nguồn (vd get_soup, parse_article) để gộp
+chung 1 file không bị đè lẫn, và bọc thêm hàm crawl_news() ở cuối
+để Web App (app.py) gọi qua nút bấm.
 
 Cài trước khi chạy:
     pip install selenium pandas beautifulsoup4 lxml requests
-Cần có Google Chrome đã cài trên máy.
+VnExpress chạy được mọi nơi (cả server cloud).
+Tuổi Trẻ cần có Google Chrome cài trên máy.
 ============================================================
 """
 
 import time
 import re
 import os
+import json
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 
 # Bọc import selenium trong try/except: trên server cloud (Streamlit
 # Community Cloud) không có Chrome/Selenium, nếu import lỗi ngay từ
-# đầu sẽ làm SẬP TOÀN BỘ app (kể cả các phần không liên quan TV1).
-# Với cách này, app vẫn mở được bình thường; chỉ riêng nút
-# "Thu thập dữ liệu (TV1)" sẽ báo lỗi nhẹ nếu bấm vào khi thiếu Selenium.
+# đầu sẽ làm SẬP TOÀN BỘ app. Với cách này, app vẫn mở được bình
+# thường; phần VnExpress (không cần Selenium) vẫn chạy tốt trên cloud,
+# chỉ riêng phần Tuổi Trẻ sẽ báo lỗi nhẹ nếu thiếu Selenium/Chrome.
 try:
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
@@ -44,8 +48,30 @@ HEADERS = {
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 OUTPUT = os.path.join(DATA_DIR, "raw_news.csv")
+
+TARGET_VNE     = 3500   # số bài VnExpress muốn đạt
 TARGET_TUOITRE = 3500   # số bài Tuổi Trẻ muốn đạt
 SAVE_EVERY     = 50     # lưu tạm sau mỗi N bài
+
+VNEXPRESS_CATEGORIES = [
+    "https://vnexpress.net/so-hoa",
+    "https://vnexpress.net/kinh-doanh",
+    "https://vnexpress.net/thoi-su",
+    "https://vnexpress.net/the-gioi",
+    "https://vnexpress.net/phap-luat",
+    "https://vnexpress.net/giao-duc",
+    "https://vnexpress.net/suc-khoe",
+    "https://vnexpress.net/du-lich",
+    "https://vnexpress.net/khoa-hoc",
+    "https://vnexpress.net/giai-tri",
+    "https://vnexpress.net/the-thao",
+    "https://vnexpress.net/xe",
+    "https://vnexpress.net/oto-xe-may",
+    "https://vnexpress.net/bat-dong-san",
+    "https://vnexpress.net/y-kien",
+    "https://vnexpress.net/tam-su",
+    "https://vnexpress.net/cuoi",
+]
 
 TUOITRE_CATEGORIES = [
     "https://tuoitre.vn/thoi-su.htm",
@@ -69,11 +95,162 @@ TUOITRE_CATEGORIES = [
 ]
 
 
-# ─────────────────────────────────────────────
-# 1. SELENIUM — gom link từ chuyên mục
-# ─────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════
+# PHẦN A — VNEXPRESS (requests + BeautifulSoup, KHÔNG cần Chrome)
+# Nguyên bản từ file crawler_vnexpress.py
+# ════════════════════════════════════════════════════════════
 
-def make_driver():
+def _vne_get_soup(url, retries=3):
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=10)
+            r.raise_for_status()
+            return BeautifulSoup(r.text, "lxml")
+        except Exception as e:
+            print(f"    Lỗi tải {url}: {e} (thử {attempt+1}/{retries})")
+            time.sleep(2)
+    return None
+
+
+def _vne_get_links_from_category(cat_url, quota, max_pages=300):
+    """Lật trang VnExpress (-p2, -p3...) cho tới khi đủ quota."""
+    links = []
+    for page in range(1, max_pages + 1):
+        url = cat_url if page == 1 else f"{cat_url}-p{page}"
+        soup = _vne_get_soup(url)
+        if not soup:
+            break
+        found_any = False
+        for a in soup.select(
+            "article.item-news-common h4.title-news a, "
+            "article.item-news h3.title-news a, "
+            "article.item-news h2.title-news a"
+        ):
+            href = a.get("href")
+            if href and href.startswith("http") and href not in links:
+                links.append(href)
+                found_any = True
+            if len(links) >= quota:
+                return links
+        if not found_any:
+            break
+        time.sleep(0.3)
+    return links
+
+
+def _vne_collect_all_links(existing_links, quota):
+    """Gom link từ nhiều chuyên mục VnExpress cho tới khi đủ quota link MỚI."""
+    new_links = []
+    n = len(VNEXPRESS_CATEGORIES)
+    for idx, cat_url in enumerate(VNEXPRESS_CATEGORIES):
+        if len(new_links) >= quota:
+            break
+        remaining_total = quota - len(new_links)
+        remaining_cats = n - idx
+        cat_quota = -(-remaining_total // remaining_cats)  # làm tròn lên
+        print(f"\n  Chuyên mục: {cat_url} (mục tiêu ~{cat_quota} bài)")
+        cat_links = _vne_get_links_from_category(cat_url, cat_quota + 20)
+        added = 0
+        for link in cat_links:
+            if link not in existing_links and link not in new_links:
+                new_links.append(link)
+                added += 1
+        print(f"  --> {added} bài mới, tổng tích lũy: {len(new_links)}/{quota}")
+    return new_links
+
+
+def _vne_get_comment_count(url):
+    """Lấy số bình luận thật qua API VnExpress."""
+    try:
+        match = re.search(r"-(\d+)\.html$", url)
+        if not match:
+            return "0"
+        article_id = match.group(1)
+        api = (f"https://usi-saas.vnexpress.net/index/get"
+               f"?offset=0&limit=1&sort=&objectid={article_id}"
+               f"&objecttype=1&siteid=1000000")
+        r = requests.get(api, headers={**HEADERS, "Referer": url}, timeout=8)
+        data = r.json()
+        total = (data.get("data") or {}).get("total_count", 0)
+        return str(total)
+    except Exception:
+        return "0"
+
+
+def _vne_parse_article(url):
+    soup = _vne_get_soup(url)
+    if not soup:
+        return None
+    try:
+        title = soup.select_one("h1.title-detail")
+        title = title.get_text(strip=True) if title else ""
+
+        date = soup.select_one("span.date")
+        date = date.get_text(strip=True) if date else ""
+
+        paras = soup.select("article.fck_detail p.Normal")
+        content = " ".join(p.get_text(strip=True) for p in paras)
+
+        author = soup.select_one("p.Normal strong")
+        author = author.get_text(strip=True) if author else ""
+
+        num_comments = _vne_get_comment_count(url)
+
+        return {
+            "nguon": "VnExpress",
+            "tieu_de": title,
+            "ngay_dang": date,
+            "tac_gia": author,
+            "noi_dung": content,
+            "so_binh_luan": num_comments,
+            "link": url,
+        }
+    except Exception as e:
+        print(f"    Lỗi parse {url}: {e}")
+        return None
+
+
+def _run_crawl_vnexpress(all_data, existing_links):
+    """Logic gốc của TV1 (crawler_vnexpress.py), y nguyên, chỉ chuyển
+    từ khối if __name__ == "__main__": thành 1 hàm dùng chung biến
+    all_data/existing_links với phần Tuổi Trẻ."""
+    vne_existing = len([d for d in all_data if d.get("nguon") == "VnExpress"])
+    need = TARGET_VNE - vne_existing
+    if need <= 0:
+        print(f"Đã đủ {TARGET_VNE} bài VnExpress rồi, không cần chạy thêm.")
+        return all_data
+
+    print(f"\nCần thêm {need} bài VnExpress.")
+    print("\n[BƯỚC 1] Gom link VnExpress...")
+    new_links = _vne_collect_all_links(existing_links, need)
+    print(f"\nTổng link VnExpress mới gom được: {len(new_links)}")
+
+    if not new_links:
+        print("Không gom được link VnExpress nào, dừng.")
+        return all_data
+
+    print(f"\n[BƯỚC 2] Cào nội dung {len(new_links)} bài VnExpress...")
+    for i, link in enumerate(new_links, 1):
+        print(f"  [VNE {i}/{len(new_links)}] {link}")
+        data = _vne_parse_article(link)
+        if data:
+            all_data.append(data)
+            existing_links.add(link)
+        if i % SAVE_EVERY == 0:
+            df_tmp = pd.DataFrame(all_data).drop_duplicates(subset=["link"])
+            df_tmp.to_csv(OUTPUT, index=False, encoding="utf-8-sig")
+            print(f"  --> Lưu tạm: {len(df_tmp)} bài tổng cộng")
+        time.sleep(0.5)
+
+    return all_data
+
+
+# ════════════════════════════════════════════════════════════
+# PHẦN B — TUỔI TRẺ (Selenium, CẦN Google Chrome)
+# Nguyên bản từ file crawler_fixed.py
+# ════════════════════════════════════════════════════════════
+
+def _tt_make_driver():
     opts = Options()
     opts.add_argument("--headless=new")
     opts.add_argument("--disable-gpu")
@@ -86,11 +263,11 @@ def make_driver():
     return driver
 
 
-ARTICLE_URL_RE = re.compile(r"-\d{10,}\.htm$")
+_TT_ARTICLE_URL_RE = re.compile(r"-\d{10,}\.htm$")
 
 
-def get_links_from_category(driver, cat_url, quota, max_clicks=80):
-    """Mở trang chuyên mục, click 'Xem thêm' liên tục cho tới khi đủ quota hoặc hết nút."""
+def _tt_get_links_from_category(driver, cat_url, quota, max_clicks=80):
+    """Mở trang chuyên mục Tuổi Trẻ, click 'Xem thêm' liên tục cho tới khi đủ quota hoặc hết nút."""
     links = []
     print(f"    Mở: {cat_url}")
     try:
@@ -110,7 +287,7 @@ def get_links_from_category(driver, cat_url, quota, max_clicks=80):
             if href.startswith("/"):
                 href = "https://tuoitre.vn" + href
             if (href.startswith("https://tuoitre.vn")
-                    and ARTICLE_URL_RE.search(href)
+                    and _TT_ARTICLE_URL_RE.search(href)
                     and href not in links):
                 links.append(href)
         print(f"      [click {click_i}] tổng tích lũy: {len(links)}")
@@ -151,17 +328,17 @@ def get_links_from_category(driver, cat_url, quota, max_clicks=80):
     return links[:quota]
 
 
-def collect_all_links(existing_links, quota):
-    """Chạy Selenium qua các chuyên mục cho tới khi gom đủ quota link mới."""
+def _tt_collect_all_links(existing_links, quota):
+    """Chạy Selenium qua các chuyên mục Tuổi Trẻ cho tới khi gom đủ quota link mới."""
     all_links = []
-    driver = make_driver()
+    driver = _tt_make_driver()
     try:
         for cat_url in TUOITRE_CATEGORIES:
             if len(all_links) >= quota:
                 break
             remaining = quota - len(all_links)
             print(f"\n  Chuyên mục: {cat_url} (cần thêm ~{remaining} bài)")
-            cat_links = get_links_from_category(driver, cat_url, remaining + 20)
+            cat_links = _tt_get_links_from_category(driver, cat_url, remaining + 20)
             added = 0
             for link in cat_links:
                 if link not in existing_links and link not in all_links:
@@ -173,11 +350,7 @@ def collect_all_links(existing_links, quota):
     return all_links
 
 
-# ─────────────────────────────────────────────
-# 2. REQUESTS — cào nội dung từng bài
-# ─────────────────────────────────────────────
-
-def get_soup(url, retries=3):
+def _tt_get_soup(url, retries=3):
     for attempt in range(retries):
         try:
             r = requests.get(url, headers=HEADERS, timeout=10)
@@ -189,7 +362,7 @@ def get_soup(url, retries=3):
     return None
 
 
-def get_comment_count(url):
+def _tt_get_comment_count(url):
     """Lấy số bình luận Tuổi Trẻ qua API JSON."""
     try:
         match = re.search(r"-(\d{10,})\.htm$", url)
@@ -203,7 +376,6 @@ def get_comment_count(url):
         if isinstance(data, dict):
             raw = data.get("Data", "[]")
             if isinstance(raw, str):
-                import json
                 raw = json.loads(raw)
             if isinstance(raw, list):
                 total = sum(1 + (c.get("child_count") or 0) for c in raw if isinstance(c, dict))
@@ -213,8 +385,8 @@ def get_comment_count(url):
     return "0"
 
 
-def parse_article(url):
-    soup = get_soup(url)
+def _tt_parse_article(url):
+    soup = _tt_get_soup(url)
     if not soup:
         return None
     try:
@@ -231,7 +403,7 @@ def parse_article(url):
         author = soup.select_one("div.detail-author-bot a.name")
         author = author.get_text(strip=True) if author else ""
 
-        num_comments = get_comment_count(url)
+        num_comments = _tt_get_comment_count(url)
 
         return {
             "nguon": "Tuổi Trẻ",
@@ -247,51 +419,68 @@ def parse_article(url):
         return None
 
 
-# ─────────────────────────────────────────────
-# 3. LOGIC CHÍNH (nguyên bản từ if __name__ == "__main__":)
-# ─────────────────────────────────────────────
-
-def _run_crawl_pipeline():
-    """Logic gốc của TV1, y nguyên như trong file crawler_fixed.py,
-    chỉ chuyển từ khối if __name__ == "__main__": thành 1 hàm."""
-    try:
-        df_old = pd.read_csv(OUTPUT, encoding="utf-8-sig")
-        all_data = df_old.to_dict("records")
-        existing_links = set(df_old["link"].tolist())
-        tt_existing = len(df_old[df_old["nguon"] == "Tuổi Trẻ"])
-        print(f"Load {len(all_data)} bài cũ ({tt_existing} Tuổi Trẻ) từ {OUTPUT}")
-    except FileNotFoundError:
-        all_data = []
-        existing_links = set()
-        tt_existing = 0
-        print("Chưa có file CSV, bắt đầu mới.")
-
+def _run_crawl_tuoitre(all_data, existing_links):
+    """Logic gốc của TV1 (crawler_fixed.py), y nguyên, chỉ chuyển
+    từ khối if __name__ == "__main__": thành 1 hàm dùng chung biến
+    all_data/existing_links với phần VnExpress."""
+    tt_existing = len([d for d in all_data if d.get("nguon") == "Tuổi Trẻ"])
     need = TARGET_TUOITRE - tt_existing
     if need <= 0:
         print(f"Đã đủ {TARGET_TUOITRE} bài Tuổi Trẻ rồi, không cần chạy thêm.")
         return all_data
 
     print(f"\nCần thêm {need} bài Tuổi Trẻ.")
-
-    print("\n[BƯỚC 1] Gom link bằng Selenium...")
-    new_links = collect_all_links(existing_links, need)
+    print("\n[BƯỚC 1] Gom link Tuổi Trẻ bằng Selenium...")
+    new_links = _tt_collect_all_links(existing_links, need)
     print(f"\nTổng link Tuổi Trẻ mới gom được: {len(new_links)}")
 
     if not new_links:
-        print("Không gom được link nào, dừng.")
+        print("Không gom được link Tuổi Trẻ nào, dừng.")
         return all_data
 
-    print(f"\n[BƯỚC 2] Cào nội dung {len(new_links)} bài...")
+    print(f"\n[BƯỚC 2] Cào nội dung {len(new_links)} bài Tuổi Trẻ...")
     for i, link in enumerate(new_links, 1):
         print(f"  [TT {i}/{len(new_links)}] {link}")
-        data = parse_article(link)
+        data = _tt_parse_article(link)
         if data:
             all_data.append(data)
+            existing_links.add(link)
         if i % SAVE_EVERY == 0:
             df_tmp = pd.DataFrame(all_data).drop_duplicates(subset=["link"])
             df_tmp.to_csv(OUTPUT, index=False, encoding="utf-8-sig")
             print(f"  --> Lưu tạm: {len(df_tmp)} bài tổng cộng")
         time.sleep(0.5)
+
+    return all_data
+
+
+# ════════════════════════════════════════════════════════════
+# PHẦN C — LOGIC CHUNG: chạy VnExpress trước, Tuổi Trẻ sau
+# ════════════════════════════════════════════════════════════
+
+def _run_crawl_pipeline():
+    """Chạy lần lượt VnExpress (không cần Chrome) rồi Tuổi Trẻ (cần
+    Chrome). Nếu không có Selenium/Chrome, vẫn chạy được phần
+    VnExpress, chỉ bỏ qua phần Tuổi Trẻ với cảnh báo rõ ràng."""
+    try:
+        df_old = pd.read_csv(OUTPUT, encoding="utf-8-sig")
+        all_data = df_old.to_dict("records")
+        existing_links = set(df_old["link"].tolist())
+        print(f"Load {len(all_data)} bài cũ từ {OUTPUT}")
+    except FileNotFoundError:
+        all_data = []
+        existing_links = set()
+        print("Chưa có file CSV, bắt đầu mới.")
+
+    # Phần A: VnExpress — luôn chạy được (không cần Chrome)
+    all_data = _run_crawl_vnexpress(all_data, existing_links)
+
+    # Phần B: Tuổi Trẻ — chỉ chạy nếu có Selenium/Chrome
+    if SELENIUM_AVAILABLE:
+        all_data = _run_crawl_tuoitre(all_data, existing_links)
+    else:
+        print("\n[BỎ QUA] Không có Selenium/Chrome — bỏ qua phần cào Tuổi Trẻ.")
+        print("Chạy lại bước này trên máy có Chrome để cào thêm Tuổi Trẻ.")
 
     df_final = pd.DataFrame(all_data).drop_duplicates(subset=["link"])
     df_final.to_csv(OUTPUT, index=False, encoding="utf-8-sig")
@@ -307,37 +496,26 @@ def _run_crawl_pipeline():
 
 
 # ─────────────────────────────────────────────
-# 4. HÀM VỎ — để app.py / main.py gọi được
+# HÀM VỎ — để app.py / main.py gọi được
 # ─────────────────────────────────────────────
 
 def crawl_news(keyword: str = None, limit: int = None) -> list:
     """
-    Hàm vỏ để Web App gọi. Bên trong gọi đúng logic gốc của TV1
-    (_run_crawl_pipeline) — KHÔNG đổi logic cào dữ liệu.
-
-    Lưu ý: code TV1 viết để chạy 1 lần lâu (Selenium cào hàng ngàn
-    bài), khi bấm nút trên web có thể sẽ chạy mất nhiều thời gian.
-    Trên server cloud (không có Chrome), hàm này sẽ báo lỗi rõ ràng
-    thay vì làm sập app.
+    Hàm vỏ để Web App gọi. Chạy VnExpress (requests, luôn chạy được,
+    cả trên server cloud) trước, sau đó Tuổi Trẻ (Selenium, cần
+    Chrome) nếu máy có sẵn Chrome.
 
     Returns:
-        list[dict]: danh sách bài báo (theo đúng cột TV1 dùng:
-        nguon, tieu_de, ngay_dang, tac_gia, noi_dung, so_binh_luan, link)
+        list[dict]: danh sách bài báo (cột: nguon, tieu_de, ngay_dang,
+        tac_gia, noi_dung, so_binh_luan, link)
     """
-    if not SELENIUM_AVAILABLE:
-        raise RuntimeError(
-            "Chức năng cào dữ liệu (Selenium + Chrome) chỉ chạy được "
-            "trên máy có cài Google Chrome, không chạy được trên server "
-            "cloud. Hãy chạy bước này trên máy cá nhân, sau đó đẩy file "
-            "data/raw_news.csv lên lại."
-        )
     return _run_crawl_pipeline()
 
 
 def save_to_csv(articles: list, path: str = OUTPUT):
     """Giữ lại để main.py gọi sau crawl_news() nếu cần lưu lại lần nữa.
-    Trong code gốc của TV1, việc lưu CSV đã được làm trong _run_crawl_pipeline(),
-    nên hàm này chỉ là lưu phòng hờ (ghi đè cùng nội dung)."""
+    Việc lưu CSV đã được làm trong _run_crawl_pipeline(), nên hàm này
+    chỉ là lưu phòng hờ (ghi đè cùng nội dung)."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     pd.DataFrame(articles).to_csv(path, index=False, encoding="utf-8-sig")
     print(f"[TV1] Đã lưu {len(articles)} bài báo vào: {path}")
