@@ -1,106 +1,108 @@
 # Phân Tích Xu Hướng Tin Tức Công Nghệ Việt Nam — Đồ án nhóm
 
-Crawl tin công nghệ từ VnExpress / Tuổi Trẻ → MySQL → Tiền xử lý & NLP
-tiếng Việt → Biểu đồ & Word Cloud → Web App tìm kiếm.
+Crawl tin từ VnExpress / Tuổi Trẻ → MySQL → Tiền xử lý & NLP →
+Biểu đồ & Word Cloud → Web App tìm kiếm.
 
 ## 1. Cấu trúc project
 
 ```
 project/
-├── app.py                  ← Web App (Streamlit) — TV5 đã code xong
-├── main.py                 ← Pipeline chạy bằng terminal — TV5 đã code xong
-├── database.py              ← Class Database (kết nối MySQL) — TV5 đã code xong
-├── article.py                ← Class Article (đại diện 1 bài báo) — TV5 đã code xong
-├── generate_sample_data.py ← Tạo data mẫu để demo (không cần khi đã có data thật)
+├── app.py                  ← Web App (Streamlit) — TV5
+├── main.py                 ← Pipeline chạy bằng terminal — TV5
+├── generate_sample_data.py ← Tạo data mẫu để demo khi chưa có data thật
 ├── requirements.txt
 ├── data/
-│   ├── raw_news.csv        ← TV1 tạo ra (sau khi crawl xong)
-│   └── clean_news.csv      ← TV3 tạo ra (sau khi clean+NLP xong) — ĐANG CÓ DATA MẪU
+│   ├── raw_news.csv        ← TV1 tạo ra (crawl xong)
+│   └── cleaned_news.csv    ← TV3 tạo ra (clean + NLP xong)
 ├── modules/
-│   ├── tv1_crawler.py      ← TV1 code hàm crawl_news() ở đây
-│   ├── tv2_database.py     ← TV2 code hàm push_to_db() ở đây
-│   ├── tv3_cleaning.py     ← TV3 code hàm clean_data() ở đây
-│   └── tv4_charts.py       ← TV4 code hàm draw_charts() ở đây
+│   ├── tv1_crawler.py      ← Code THẬT của TV1 (Selenium crawl Tuổi Trẻ)
+│   ├── tv2_database.py     ← Code THẬT của TV2 (tạo bảng MySQL "news_db")
+│   ├── tv3_cleaning.py     ← Code THẬT của TV3 (12 bước clean + import MySQL)
+│   └── tv4_charts.py       ← CHƯA CÓ — đang chờ TV4 gửi code vẽ biểu đồ
 └── outputs/
-    ├── charts/             ← TV4 lưu ảnh biểu đồ vào đây
-    └── wordcloud/          ← TV4 lưu ảnh Word Cloud vào đây
+    ├── charts/
+    └── wordcloud/
 ```
 
-## 2. Cài đặt
+## 2. Cấu trúc MySQL THẬT đang dùng
+
+- Database: **`news_db`**
+- Bảng chính: **`news`** — cột: `id, title, publish_date, author, content, comments, source, url`
+- Bảng phụ: **`keywords`** — cột: `keyword_id, news_id, keyword_name, frequency` (khóa ngoại tới `news.id`)
+- Kết nối: `host=localhost, user=root, password=09112007`
+
+App tự đổi tên cột (`publish_date`→`published_date`, `comments`→`num_comments`...)
+khi hiển thị, không cần sửa code TV2/TV3.
+
+## 3. Cài đặt
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Cài MySQL (nếu chưa có)
-- Cài XAMPP (có sẵn MySQL Server + phpMyAdmin), HOẶC
-- Cài MySQL Server + MySQL Workbench (icon cá heo) riêng
+MySQL: dùng XAMPP hoặc MySQL Server + Workbench, mật khẩu root đã
+đặt sẵn trong code là `09112007` — nếu máy bạn đặt mật khẩu khác,
+sửa trong `modules/tv2_database.py` và `modules/tv3_cleaning.py`
+(2 chỗ, dòng `password="09112007"`).
 
-Mặc định code nối tới `localhost`, user `root`, không mật khẩu —
-đúng cấu hình XAMPP phổ biến. Nếu MySQL của bạn khác, sửa 4 dòng
-đầu trong `database.py` (HOST/USER/PASSWORD/DATABASE) hoặc set
-biến môi trường `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`.
+TV1 (crawler) cần Google Chrome đã cài trên máy (dùng Selenium).
 
-**Không cần tự tạo database/bảng bằng tay** — `database.py` tự
-động tạo database `tech_news_db` và bảng `articles` khi chạy lần đầu.
-
-## 3. Cách chạy
+## 4. Cách chạy
 
 ```bash
-# Kiểm tra kết nối MySQL trước:
-python database.py
-
-# Chạy bằng terminal:
-python main.py
-
-# Chạy Web App (khuyên dùng để demo cho giảng viên):
+# Chạy Web App (khuyên dùng):
 streamlit run app.py
+
+# Hoặc chạy bằng terminal:
+python main.py
 ```
 
-Trong Web App có nút **"Kiểm tra kết nối MySQL"** ở menu bên trái —
-bấm để chắc app đã nối đúng MySQL trên máy bạn.
+Trong Web App có nút **"Kiểm tra kết nối MySQL"** ở menu bên trái.
 
-## 4. Việc của từng người (TV1–TV4)
+## 5. Việc của từng người
 
-Mỗi người **chỉ cần sửa file của mình trong `modules/`**, không cần
-sửa `app.py`, `main.py`, `database.py`, `article.py`.
+| Ai | File | Trạng thái |
+|---|---|---|
+| TV1 | `modules/tv1_crawler.py` | ✅ Đã gán code thật (crawl Tuổi Trẻ) |
+| TV2 | `modules/tv2_database.py` | ✅ Đã gán code thật (tạo bảng MySQL) |
+| TV3 | `modules/tv3_cleaning.py` | ✅ Đã gán code thật (12 bước clean + import MySQL) |
+| TV4 | `modules/tv4_charts.py` | ⏳ Đang chờ — gửi code khi xong, hàm cần tên `draw_charts(df)` |
+| **TV5** | `app.py`, `main.py`, `requirements.txt`, `README.md` | ✅ Trưởng nhóm — Tích hợp hệ thống & Quản lý chất lượng |
 
-| Ai | File | Hàm cần code | Input | Output |
-|---|---|---|---|---|
-| TV1 | `modules/tv1_crawler.py` | `crawl_news()` | — | list[Article] |
-| TV2 | `modules/tv2_database.py` | `push_to_db(df)` | DataFrame | True/False (ghi vào MySQL) |
-| TV3 | `modules/tv3_cleaning.py` | `clean_data(df)` | DataFrame thô | DataFrame sạch + cột keywords (NLP) |
-| TV4 | `modules/tv4_charts.py` | `draw_charts(df)` | DataFrame sạch | list Figure + ảnh PNG + wordcloud |
+**Việc cụ thể của TV5 (System Integrator & Editor):**
+- Thiết kế và code **`app.py`** — Web App (Streamlit):
+  - **Menu điều khiển (sidebar)**: nút kiểm tra kết nối MySQL, 4 nút
+    chạy từng bước pipeline riêng lẻ (TV1→TV4), 1 nút chạy toàn bộ
+    pipeline, nút tải lại dữ liệu mẫu/có sẵn, khung nhật ký chạy.
+  - **Ô tìm kiếm gợi ý**: gõ 1 chữ/số/vài chữ, tự động lọc và hiện
+    danh sách bài báo khớp theo tiêu đề, tóm tắt, chủ đề, từ khóa.
+  - **3 tab giao diện chính**: "Tìm kiếm gợi ý", "Biểu đồ & WordCloud",
+    "Dữ liệu" (xem toàn bộ bảng dữ liệu thô).
+  - Bố cục `layout="wide"`, tiêu đề, icon, caption mô tả từng phần.
+- Code **`main.py`** — chạy pipeline liên hoàn bằng terminal (không cần
+  mở web): TV1 → TV2 → TV3 → TV4.
+- Bọc code thật của TV1/TV2/TV3 thành các hàm chuẩn (`crawl_news()`,
+  `push_to_db()`, `clean_data()`) để web app gọi được qua nút bấm, giữ
+  nguyên 100% logic xử lý của từng người.
+- Xử lý lệch cấu trúc dữ liệu giữa các module (tên cột tiếng Việt/tiếng
+  Anh khác nhau, tên file CSV khác nhau) bằng lớp chuẩn hóa trong `app.py`,
+  để không bắt từng người phải sửa code theo nhau.
+- Deploy app lên Streamlit Community Cloud (qua GitHub) để có link
+  public, ai cũng xem được không cần cài đặt gì.
+- Viết tài liệu hướng dẫn (`README.md`), quản lý cấu trúc thư mục project.
 
-**Class có sẵn để dùng chung** (không cần tự viết lại):
-- `Database` (`database.py`): quản lý kết nối MySQL
-- `Article` (`article.py`): đại diện 1 bài báo, có sẵn
-  `save_to_db()`, `save_many_to_db()`, `get_all()`, `search_by_keyword()`
+Mỗi file trong `modules/` đã được giữ **nguyên 100% logic xử lý**
+của từng người, chỉ thêm 1 hàm "vỏ" ở cuối file để app gọi qua nút
+bấm (`crawl_news()`, `push_to_db()`, `clean_data()`, `draw_charts()`).
+Nếu thành viên nào sửa lại code, chỉ cần thay phần code chính
+trong file của họ, giữ nguyên tên hàm vỏ ở cuối.
 
-**Cột dữ liệu chuẩn cả nhóm phải theo:**
-`title, summary, content, url, source, author, published_date (YYYY-MM-DD), num_comments, category, keywords`
+## 6. Lưu ý
 
-## 5. Test riêng từng module (không cần chờ người khác xong)
-
-```bash
-python modules/tv1_crawler.py
-python modules/tv2_database.py
-python modules/tv3_cleaning.py
-python modules/tv4_charts.py
-```
-
-## 6. Xem dữ liệu trong MySQL Workbench
-
-Mở MySQL Workbench (icon cá heo) → kết nối `localhost` →
-database `tech_news_db` → bảng `articles` → chuột phải →
-**"Select Rows - Limit 1000"** để xem toàn bộ dữ liệu đã crawl.
-
-## 7. Lưu ý
-
-- Hiện tại `data/clean_news.csv` đang chứa **80 bài báo công nghệ mẫu
-  (giả)** để demo ô tìm kiếm, web app, MySQL ngay từ bây giờ.
-- Khi TV1–TV3 code xong và chạy thật, dữ liệu thật sẽ tự thay thế —
-  **không cần sửa code app.py / main.py**.
-- Nếu một bước nào đó (hoặc MySQL) chưa sẵn sàng, app vẫn chạy được
-  nhờ cơ chế xử lý lỗi có sẵn trong `main.py` / `app.py`.
-"# web-check-B-o-Vn-si-u-uy-t-n" 
+- App ưu tiên đọc dữ liệu từ MySQL nếu kết nối được; nếu không,
+  tự rơi về đọc file `data/cleaned_news.csv` có sẵn.
+- Cào dữ liệu (TV1) qua Selenium chạy khá lâu (hàng ngàn bài) —
+  khi bấm nút "Thu thập dữ liệu" trên web, có thể mất nhiều thời
+  gian để hoàn tất.
+- Xem dữ liệu trực tiếp: mở MySQL Workbench (icon cá heo) →
+  `news_db` → bảng `news` → chuột phải → "Select Rows - Limit 1000".
