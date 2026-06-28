@@ -248,7 +248,9 @@ if run_all:
         raw = tv1_crawler.crawl_news()
         tv1_crawler.save_to_csv(raw)
         st.session_state.raw_df = pd.read_csv(RAW_PATH)
-    except NotImplementedError:
+    except (NotImplementedError, RuntimeError):
+        # Bỏ qua nếu TV1 chưa code xong, hoặc đang chạy trên server
+        # cloud không có Chrome/Selenium — dùng lại data đã có sẵn.
         st.session_state.raw_df = pd.read_csv(RAW_PATH) if os.path.exists(RAW_PATH) else None
     progress.progress(25, text="Bước 1 xong (hoặc bỏ qua) — đang đẩy MySQL...")
 

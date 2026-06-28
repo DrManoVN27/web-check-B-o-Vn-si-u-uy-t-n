@@ -4,5 +4,8 @@ matplotlib
 mysql-connector-python
 requests
 beautifulsoup4
+lxml
+selenium
+scikit-learn
 underthesea
 wordcloud

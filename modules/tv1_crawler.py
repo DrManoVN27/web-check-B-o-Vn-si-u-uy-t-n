@@ -22,11 +22,20 @@ import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+# Bọc import selenium trong try/except: trên server cloud (Streamlit
+# Community Cloud) không có Chrome/Selenium, nếu import lỗi ngay từ
+# đầu sẽ làm SẬP TOÀN BỘ app (kể cả các phần không liên quan TV1).
+# Với cách này, app vẫn mở được bình thường; chỉ riêng nút
+# "Thu thập dữ liệu (TV1)" sẽ báo lỗi nhẹ nếu bấm vào khi thiếu Selenium.
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    SELENIUM_AVAILABLE = True
+except ImportError:
+    SELENIUM_AVAILABLE = False
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -308,11 +317,20 @@ def crawl_news(keyword: str = None, limit: int = None) -> list:
 
     Lưu ý: code TV1 viết để chạy 1 lần lâu (Selenium cào hàng ngàn
     bài), khi bấm nút trên web có thể sẽ chạy mất nhiều thời gian.
+    Trên server cloud (không có Chrome), hàm này sẽ báo lỗi rõ ràng
+    thay vì làm sập app.
 
     Returns:
         list[dict]: danh sách bài báo (theo đúng cột TV1 dùng:
         nguon, tieu_de, ngay_dang, tac_gia, noi_dung, so_binh_luan, link)
     """
+    if not SELENIUM_AVAILABLE:
+        raise RuntimeError(
+            "Chức năng cào dữ liệu (Selenium + Chrome) chỉ chạy được "
+            "trên máy có cài Google Chrome, không chạy được trên server "
+            "cloud. Hãy chạy bước này trên máy cá nhân, sau đó đẩy file "
+            "data/raw_news.csv lên lại."
+        )
     return _run_crawl_pipeline()
 
 
