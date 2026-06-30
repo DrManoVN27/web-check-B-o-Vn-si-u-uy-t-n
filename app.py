@@ -55,6 +55,28 @@ st.set_page_config(
     layout="wide",
 )
 
+# ============================================================
+# CHẾ ĐỘ ADMIN — chỉ TV5 dùng để chạy pipeline / xem dữ liệu thô.
+# Người dùng thường vào link bình thường sẽ KHÔNG thấy Menu điều
+# khiển (sidebar) và tab "Dữ liệu". Để bật chế độ admin, vào app
+# kèm "?admin=1" trên URL, ví dụ:
+#     https://ten-app.streamlit.app/?admin=1
+# hoặc lúc chạy local: http://localhost:8501/?admin=1
+# ============================================================
+ADMIN_MODE = st.query_params.get("admin") == "1"
+
+if not ADMIN_MODE:
+    # Ẩn hẳn sidebar khỏi giao diện (cả nút mũi tên mở sidebar)
+    st.markdown(
+        """
+        <style>
+            [data-testid="stSidebar"] { display: none; }
+            [data-testid="collapsedControl"] { display: none; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 # ---------- HÀM TIỆN ÍCH ----------
 
 # Bản đồ đổi tên cột: tên cột THẬT mà nhóm đang dùng -> tên cột app cần.
@@ -293,7 +315,10 @@ if run_all:
 st.title("📰 Phân Tích Xu Hướng Tin Tức Công Nghệ Việt Nam")
 st.caption("VnExpress · Tuổi Trẻ — Đồ án nhóm — TV5: Tích hợp hệ thống & Quản lý chất lượng")
 
-tab_search, tab_charts, tab_data = st.tabs(["🔎 Tìm kiếm gợi ý", "📊 Biểu đồ & WordCloud", "🗂️ Dữ liệu"])
+if ADMIN_MODE:
+    tab_search, tab_charts, tab_data = st.tabs(["🔎 Tìm kiếm gợi ý", "📊 Biểu đồ & WordCloud", "🗂️ Dữ liệu"])
+else:
+    tab_search, tab_charts = st.tabs(["🔎 Tìm kiếm gợi ý", "📊 Biểu đồ & WordCloud"])
 
 # ---------- TAB 1: TÌM KIẾM GỢI Ý ----------
 with tab_search:
@@ -394,10 +419,11 @@ with tab_charts:
     if os.path.exists(WORDCLOUD_PATH):
         st.image(WORDCLOUD_PATH, caption="Word Cloud từ khóa công nghệ", use_container_width=True)
 
-# ---------- TAB 3: DỮ LIỆU ----------
-with tab_data:
-    st.subheader("Toàn bộ dữ liệu hiện có")
-    df_all = st.session_state.clean_df if st.session_state.clean_df is not None else load_articles_csv(CLEAN_PATH)
-    st.dataframe(df_all, use_container_width=True)
-    st.caption(f"Tổng số bài báo: {len(df_all) if df_all is not None else 0}")
-    st.caption("💡 Mở MySQL Workbench (icon cá heo) → database 'news_db' → bảng 'news' để xem trực tiếp trong SQL.")
+# ---------- TAB 3: DỮ LIỆU (chỉ admin) ----------
+if ADMIN_MODE:
+    with tab_data:
+        st.subheader("Toàn bộ dữ liệu hiện có")
+        df_all = st.session_state.clean_df if st.session_state.clean_df is not None else load_articles_csv(CLEAN_PATH)
+        st.dataframe(df_all, use_container_width=True)
+        st.caption(f"Tổng số bài báo: {len(df_all) if df_all is not None else 0}")
+        st.caption("💡 Mở MySQL Workbench (icon cá heo) → database 'news_db' → bảng 'news' để xem trực tiếp trong SQL.")
