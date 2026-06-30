@@ -26,6 +26,16 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from modules import tv1_crawler, tv2_database, tv3_cleaning, tv4_charts
 
+# Tìm kiếm ngữ nghĩa bằng Vector Database (ChromaDB) — bọc try/except
+# vì thư viện chromadb + sentence-transformers khá nặng, có thể chưa
+# cài hoặc chưa hỗ trợ trên server cloud; nếu thiếu, app vẫn chạy
+# bình thường với tìm kiếm chuỗi ký tự thông thường (fallback).
+try:
+    import vector_search
+    VECTOR_SEARCH_AVAILABLE = True
+except ImportError:
+    VECTOR_SEARCH_AVAILABLE = False
+
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 RAW_PATH = os.path.join(DATA_DIR, "raw_news.csv")
 # Lưu ý: TV3 (data_cleaning_pipeline.py) xuất ra tên file "cleaned_news.csv"
@@ -288,36 +298,85 @@ tab_search, tab_charts, tab_data = st.tabs(["🔎 Tìm kiếm gợi ý", "📊 B
 # ---------- TAB 1: TÌM KIẾM GỢI Ý ----------
 with tab_search:
     st.subheader("Tìm kiếm bài báo công nghệ")
-    st.caption("Gõ 1 chữ, 1 số hoặc vài chữ — danh sách gợi ý hiện ngay bên dưới.")
-
-    keyword = st.text_input(
-        "Nhập từ khóa tìm kiếm:",
-        placeholder="Ví dụ: AI, 2026, smartphone, an ninh mạng...",
-        key="search_box",
-    )
 
     df = st.session_state.clean_df if st.session_state.clean_df is not None else load_articles_csv(CLEAN_PATH)
+
+    # ----- Khu vực chuẩn bị Vector DB (chỉ cần làm 1 lần) -----
+    if VECTOR_SEARCH_AVAILABLE:
+        vector_db_ready = vector_search.collection_exists_and_has_data()
+        col_a, col_b = st.columns([3, 1])
+        with col_a:
+            if vector_db_ready:
+                st.caption("✅ Vector DB (ChromaDB) đã sẵn sàng — gõ câu mô tả, không cần đúng từ khóa.")
+            else:
+                st.caption("⚠️ Vector DB chưa được xây dựng lần nào. Bấm nút bên phải để xây dựng (chỉ cần 1 lần, mất vài phút với dữ liệu lớn).")
+        with col_b:
+            if st.button("🧠 Xây dựng Vector DB", use_container_width=True):
+                if df is None or df.empty:
+                    st.warning("Chưa có dữ liệu để xây dựng.")
+                else:
+                    with st.spinner("Đang tính embedding và lưu vào ChromaDB (có thể mất vài phút)..."):
+                        try:
+                            vector_search.build_vector_index(df)
+                            st.success("Đã xây dựng xong Vector DB! Giờ có thể tìm kiếm theo ngữ nghĩa.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Lỗi khi xây dựng Vector DB: {e}")
+        search_mode = st.radio(
+            "Kiểu tìm kiếm:",
+            ["🧠 Tìm kiếm thông minh (Vector DB - hiểu nghĩa câu)", "🔤 Tìm kiếm theo từ khóa (so khớp chữ)"],
+            horizontal=True,
+            disabled=not vector_db_ready,
+        )
+    else:
+        search_mode = "🔤 Tìm kiếm theo từ khóa (so khớp chữ)"
+        st.caption("ℹ️ Vector DB chưa khả dụng (thiếu thư viện chromadb/sentence-transformers). Đang dùng tìm kiếm theo từ khóa.")
+
+    if "Vector DB" in search_mode:
+        st.caption("Gõ cả câu mô tả ý bạn muốn tìm — ví dụ: 'các loại thuốc bổ ích', 'tấn công mạng nguy hiểm'. Vector DB sẽ hiểu nghĩa, không cần đúng từ khóa.")
+    else:
+        st.caption("Gõ 1 chữ, 1 số hoặc vài chữ — tìm các bài có chứa đúng chữ đó.")
+
+    keyword = st.text_input(
+        "Nhập nội dung tìm kiếm:",
+        placeholder="Ví dụ: AI, 2026, smartphone, an ninh mạng, các loại thuốc bổ ích...",
+        key="search_box",
+    )
 
     if df is None or df.empty:
         st.info("Chưa có dữ liệu bài báo nào. Hãy chạy pipeline ở menu bên trái hoặc dùng dữ liệu mẫu.")
     elif keyword:
-        results = search_articles(df, keyword)
-        st.write(f"**Tìm thấy {len(results)} bài báo khớp với '{keyword}':**")
+        if "Vector DB" in search_mode and VECTOR_SEARCH_AVAILABLE and vector_search.collection_exists_and_has_data():
+            try:
+                with st.spinner("Đang tìm kiếm trong Vector DB..."):
+                    results = vector_search.vector_search(keyword, df)
+                st.write(f"**Tìm thấy {len(results)} bài báo liên quan tới '{keyword}' (theo ngữ nghĩa):**")
+            except Exception as e:
+                st.error(f"Lỗi tìm kiếm Vector DB: {e}. Chuyển sang tìm kiếm theo từ khóa.")
+                results = search_articles(df, keyword)
+        else:
+            results = search_articles(df, keyword)
+            st.write(f"**Tìm thấy {len(results)} bài báo khớp với '{keyword}':**")
+
         if results.empty:
             st.warning("Không tìm thấy bài báo phù hợp. Thử từ khóa khác.")
         else:
             for _, row in results.head(20).iterrows():
                 with st.container(border=True):
+                    score_text = ""
+                    if "similarity_score" in row and pd.notna(row.get("similarity_score")):
+                        score_text = f" • 🎯 Độ liên quan: {row['similarity_score']*100:.0f}%"
                     st.markdown(f"**{row['title']}**")
                     st.caption(
                         f"📰 {row.get('source', '')} • ✍️ {row.get('author', '')} • "
                         f"📅 {row.get('published_date', '')} • 💬 {row.get('num_comments', 0)} bình luận"
+                        f"{score_text}"
                     )
                     st.write(row.get("summary", ""))
                     if pd.notna(row.get("url", None)):
                         st.markdown(f"[🔗 Xem bài báo gốc]({row['url']})")
     else:
-        st.info("👆 Nhập từ khóa vào ô trên để xem gợi ý bài báo.")
+        st.info("👆 Nhập nội dung vào ô trên để xem gợi ý bài báo.")
         st.dataframe(df.head(10), use_container_width=True)
 
 # ---------- TAB 2: BIỂU ĐỒ ----------

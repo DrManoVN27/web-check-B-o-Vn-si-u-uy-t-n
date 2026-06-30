@@ -9,3 +9,5 @@ selenium
 scikit-learn
 underthesea
 wordcloud
+sentence-transformers
+chromadb
