@@ -11,3 +11,4 @@ underthesea
 wordcloud
 sentence-transformers
 chromadb
+seaborn 
