@@ -405,19 +405,36 @@ with tab_search:
         st.dataframe(df.head(10), use_container_width=True)
 
 # ---------- TAB 2: BIỂU ĐỒ ----------
+CHART_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs", "charts")
+CHART_FILES = [
+    (os.path.join(CHART_DIR, "trend_by_date.png"),  "Xu hướng số bài viết theo ngày"),
+    (os.path.join(CHART_DIR, "top_keywords.png"),   "Top 15 từ khóa công nghệ phổ biến nhất"),
+]
+
 with tab_charts:
     st.subheader("Biểu đồ phân tích & Word Cloud (TV4)")
-    if st.session_state.figs:
+
+    # Ưu tiên hiển thị file PNG đã lưu sẵn (stable, không phụ thuộc session)
+    png_found = any(os.path.exists(p) for p, _ in CHART_FILES) or os.path.exists(WORDCLOUD_PATH)
+
+    if png_found:
+        for path, caption in CHART_FILES:
+            if os.path.exists(path):
+                st.image(path, caption=caption, use_container_width=True)
+        if os.path.exists(WORDCLOUD_PATH):
+            st.image(WORDCLOUD_PATH, caption="Đám mây từ khóa công nghệ", use_container_width=True)
+    elif st.session_state.figs:
+        # fallback: session vẫn còn (ví dụ admin vừa bấm vẽ trong phiên này)
         for fig in st.session_state.figs:
             try:
                 st.pyplot(fig)
             except Exception:
-                st.write("Không thể hiển thị biểu đồ này.")
+                pass
     else:
-        st.info("Chưa có biểu đồ nào. Hãy bấm '4️⃣ Vẽ biểu đồ & WordCloud (TV4)' hoặc 'CHẠY TOÀN BỘ PIPELINE'.")
-
-    if os.path.exists(WORDCLOUD_PATH):
-        st.image(WORDCLOUD_PATH, caption="Word Cloud từ khóa công nghệ", use_container_width=True)
+        if ADMIN_MODE:
+            st.info("Chưa có biểu đồ. Hãy bấm '4️⃣ Vẽ biểu đồ & WordCloud (TV4)' ở menu bên trái.")
+        else:
+            st.info("Biểu đồ đang được cập nhật, vui lòng quay lại sau.")
 
 # ---------- TAB 3: DỮ LIỆU (chỉ admin) ----------
 if ADMIN_MODE:
